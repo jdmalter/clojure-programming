@@ -271,3 +271,662 @@
 
 ; disj removes values from a set
 (disj #{1 2 3} 3 1) ; #{2}
+
+; define sorted map
+(def sm (sorted-map :z 5 :x 9 :y 0 :b 2 :a 3 :c 4))
+sm ; {:a 3 :b 2 :c 4 :x 9 :y 0 :z 5}
+
+; rseq returns reverse sorted in constant time
+(rseq sm) ; ([:z 5] [:y 0] [:x 9] [:c 4] [:b 2] [:a 3])
+
+; sorted has far better performance than seq-only operations
+(subseq sm <= :c) ; ([:a 3] [:b 2] [:c 4])
+(subseq sm > :b <= :y) ; ([:c 4] [:x 9] [:y 0])
+(rsubseq sm > :b <= :y) ; ([:y 0] [:x 9] [:c 4])
+
+; compare supports all Clojure scalers and sequential collections (and java.lang.Comparable)
+(compare 2 2) ; 0
+(compare "ab" "abc") ; -1
+(compare ["a" "b" "c"] ["a" "b"]) ; 1
+(compare ["a" 2] ["a" 2 0]) ; -1
+
+; convert predicate to comparator
+((comparator <) 1 4) ; -1
+((comparator <) 4 1) ; 1
+((comparator <) 4 4) ; 0
+
+; (comp - compare) negates the results of (compare)
+(sorted-map-by compare :z 5 :x 9 :y 0 :b 2 :a 3 :c 4) ; {:a 3, :b 2, :c 4, :x 9, :y 0, :z 5}
+(sorted-map-by (comp - compare) :z 5 :x 9 :y 0 :b 2 :a 3 :c 4) ; {:z 5, :y 0, :x 9, :c 4, :b 2, :a 3}
+
+; define some function
+(defn magnitude
+  [x]
+  (-> x Math/log10 Math/floor))
+(magnitude 100)
+(magnitude 100000)
+
+; define some comparison function
+(defn compare-magnitude
+  [a b]
+  (neg? (- (magnitude a) (magnitude b))))
+((comparator compare-magnitude) 10 10000) ; -1
+((comparator compare-magnitude) 100 10) ; 1
+((comparator compare-magnitude) 10 75) ; 0
+
+; create sorted set with comparator
+(sorted-set-by compare-magnitude 10 1000 500) ; #{10 500 1000}
+(conj *1 600) ; 600 is not added to set because its magnitude is the same as 500's magnitude
+(disj *1 750) ; #{10 1000} 500 is disjoined from set because its magnitude is the same as 500's magnitude
+(contains? *1 1239) ; 1239 has same order of magnitude as 1000
+
+; subseq and rsubseq can implement linear interpolation
+(defn interpolate
+  "Takes a collection of points (as [x y] tuples), returning a function
+   which is a linear interpolation between those points."
+  [points]
+  (let [results (into (sorted-map) (map vec points))]
+    (fn [x]
+      (let [[xa ya] (first (rsubseq results <= x))
+            [xb yb] (first (subseq results > x))]
+        (if (and xa xb)
+          (/ (+ (* ya (- xb x)) (* yb (- x xa)))
+             (- xb xa))
+          (or ya yb))))))
+(def f (interpolate [[0 0] [10 10] [15 5]]))(map f [2 10 12])
+
+; collections are functions
+(get [:a :b :c] 2) ; c
+([:a :b :c] 2) ; c
+
+(get {:a 5 :b 6} :b) ; 6
+({:a 5 :b 6} :b) ; 6
+
+(get {:a 5 :b 6} :c 7) ; 7
+({:a 5 :b 6} :c 7) ; 7
+
+(get #{1 2 3} 3) ; 3
+(#{1 2 3} 3) ; 3
+
+; collections keys are (often) functions
+(get {:a 5 :b 6} :b) ; 6
+(:b {:a 5 :b 6}) ; 6
+
+(get {:a 5 :b 6} :c 7) ; 7
+(:c {:a 5 :b 6} 7) ; 7
+
+(get #{:a :b :c} :d) ; nil
+(:d #{:a :b :c}) ; nil
+
+; show difference between collection as function and key as function
+(defn get-foo
+  [map]
+  (:foo map))
+(get-foo nil) ; nil
+(defn get-bar
+  [map]
+  (map :bar))
+(get-bar nil) ; NullPointerException
+
+; easier to use collections without get
+(map :name [{:age 21 :name "David"}
+            {:gender :f :name "Suzanne"}
+            {:name "Sarah" :location "NYC"}]) ; ("David" "Suzanne" "Sarah")
+
+; some returns first value in sequence that returns true
+(some #{1 3 7} [0 2 4 5 6]) ; nil
+(some #{1 3 7} [0 2 3 4 5 6]) ; 3
+
+; filter is more general
+(filter :age [{:age 21 :name "David"}
+              {:gender :f :name "Suzanne"}
+              {:name "Sara" :location "NYC"}]) ; ({:age 21, :name "David"})
+(filter (comp (partial <= 25) :age) [{:age 21 :name "David"}
+              {:gender :f :name "Suzanne" :age 20}
+              {:name "Sara" :location "NYC" :age 34}]) ; ({:age 34 :name "Sara" :location "NYC"})
+
+; remove is compliment of filter
+(remove (comp (partial <= 25) :age) [{:age 21 :name "David"}
+              {:gender :f :name "Suzanne" :age 20}
+              {:name "Sara" :location "NYC" :age 34}]) ; ({:age 21 :name "David"} {:age 20 :name "Suzanne" :gender :f})
+
+; lists are singly linked lists
+`(1 2 3) ; (1 2 3)
+
+; expressions in lists are not evaluated unless list is called
+`(1 2 (+ 1 2)) ; (1 2 (+ 1 2))
+(list 1 2 (+ 1 2)) ; (1 2 3)
+
+; vectors can be created with vector and vec
+(vector 1 2 3) ; [1 2 3]
+(vec (range 5)) ; [0 1 2 3 4]
+
+; vectors as tuples
+(defn euclidean-division
+  [x y]
+  [(quot x y) (rem x y)])
+(euclidean-division 42 8) ; [5 2]
+((juxt quot rem) 42 8) ; does the same thing
+
+; vectors work with destructuring
+(let [[q r] (euclidean-division 53 7)]
+  (str "53/7 = " q " * 7 + " r)) ; 53/7 = 7 * 7 + 4
+
+; set literals must not contain duplicate keys
+#{1 2 3} ; #{1 2 3}
+#{1 2 3 3} ; IllegalArgmentException Duplicate key: 3
+
+; construct some sets
+(hash-set :a :b :c :d) ; #{:c :b :d :a}
+(set [1 6 1 8 3 7 7]) ; #{7 1 6 3 8}
+
+; map literals must not contain duplicate keys
+{:a 5 :b 6} ; {:b 6 :a 5}
+{:a 5 :a 5} ; IllegalArgumentException Duplicate key: :a
+
+; construct some maps
+(hash-map :a 5 :b 6) ; {:b 6 :a 5}
+(apply hash-map [:a 5 :b 6]) ; {:b 6 :a 5}
+
+; use simple map like an object
+(def playlist
+  [{:title "Elephant" :artist "The White Stripes" :year 2003}
+   {:title "Helioself" :artist "Papas Fritas" :year 1997}
+   {:title "Stories from the City, Stories from the Sea" :artist "PJ Harvey" :year 2000}
+   {:title "Buildings and Grounds" :artist "Papas Fritas" :year 2000}
+   {:title "Zen Rodeo" :artist "Mardi Gras BB" :year 2002}])
+(map :title playlist) ; ("Elephant" "Helioself" "Stories from the City, Stories from the Sea" "Buildings and Grounds" "Zen Rodeo")
+(defn summarize [{:keys [title artist year]}]
+  (str title " / " artist " / " year))
+
+; maps can partition a collection by a key function
+(group-by #(rem % 3) (range 10)) ; {0 [0 3 6 9], 1 [1 4 7], 2 [2 5 8]}
+(group-by :artist playlist)
+
+; define some order data
+(def orders
+  [{:product "Clock" :customer "Wile Coyote" :qty 6 :total 300}
+   {:product "Dynamite" :customer "Wile Coyote" :qty 20 :total 5000}
+   {:product "Shotgun" :customer "Elmer Fudd" :qty 2 :total 800}
+   {:product "Shells" :customer "Elmer Fudd" :qty 4 :total 100}
+   {:product "Hole" :customer "Wile Coyote" :qty 1 :total 1000}
+   {:product "Anvil" :customer "Elmer Fudd" :qty 2 :total 300}
+   {:product "Anvil" :customer "Wile Coyote" :qty 6 :total 900}])
+
+; a mix of group-by and reduce
+(defn reduce-by
+  [key-fn f init coll]
+  (reduce (fn [summaries  x]
+            (let [k (key-fn x)]
+              (assoc summaries k (f (summaries k init) x))))
+          {} coll))
+
+; order totals by customer
+(reduce-by :customer #(+ %1 (:total %2)) 0 orders)
+
+; get customers for each product
+(reduce-by :product #(conj %1 (:customer %2)) #{} orders)
+
+; all orders by customer, and the by product
+(reduce-by (juxt :customer :product)
+           #(+ %1 (:total %2)) 0 orders)
+
+; a reduce-by that works with nested maps
+(defn reduce-by-in
+  [keys-fn f init coll]
+  (reduce (fn [summaries x]
+            (let [ks (keys-fn x)]
+              (assoc-in summaries ks
+                        (f (get-in summaries ks init) x))))
+          {} coll))
+
+; all orders by customer, and then by product into nested map
+(reduce-by-in (juxt :customer :product)
+           #(+ %1 (:total %2)) 0 orders)
+
+; which is equivalent to:
+(def flat-breakup
+  {["Wile Coyote" "Anvil"] 900,
+   ["Elmer Fudd" "Anvil"] 300,
+   ["Wile Coyote" "Hole"] 1000,
+   ["Elmer Fudd" "Shells"] 100,
+   ["Elmer Fudd" "Shotgun"] 800,
+   ["Wile Coyote" "Dynamite"] 5000,
+   ["Wile Coyote" "Clock"] 300})
+(reduce #(apply assoc-in %1 %2) {} flat-breakup)
+
+; arguments are not modified by operation
+(+ 1 2) ; 3
+
+; define a vector of one million elements
+(def v (vec (range 1e6)))
+(count v) ; 1000000
+(def v2 (conj v 1e6)) ; add an element into v
+(count v2) ; 1000001
+(count v) ; v not modified by conj
+
+; free versioning
+(def version1 {:name "Chas" :info {:age 31}})
+(def version2 (update-in version1 [:info :age] + 3))
+version1 ; {:name "Chas", :info {:age 31}}
+version2 ; {:name "Chas", :info {:age 34}}
+
+; there are mutable collections, transients
+(def x (transient []))
+(def y (conj! x 1))
+(count y) ; 1
+(count x) ; 1, x was modified by conj to y
+
+; define implementation of into without transients
+(defn naive-into
+  [coll source]
+  (reduce conj coll source))
+(= (into #{} (range 500))
+   (naive-into #{} (range 500))) ; true
+(time (do (into #{} (range 1e6))
+        nil)) ; "Elapsed time: 462.547902 msecs"
+(time (do (naive-into #{} (range 1e6))
+        nil)) ; "Elapsed time: 781.066263 msecs"
+
+; define implementation of into with transients
+(defn faster-into
+  [coll source]
+  (persistent! (reduce conj! (transient coll) source)))
+(time (do (faster-into #{} (range 1e6))
+        nil)) ; "Elapsed time: 451.34639 msecs"
+
+; convert between persistent and transient
+(def v [1 2])
+(def tv (transient v))
+(conj v 3) ; [1 2 3] not modified by tv
+(persistent! tv) ; [1 2]
+(get tv 0) ; IllegalAccessError Transient used after persistent! call
+
+; transients support most persistent functions
+(nth (transient [1 2]) 1) ; 2
+(get (transient {:a 1 :b 2}) :a) ; 1
+((transient {:a 1 :b 2}) :a) ; 1, transients are functions too
+((transient [1 2]) 1) ; 2, transients are functions too
+(find (transient {:a 1 :b 2}) 2) ; ClassCastException
+
+; transients have no value semantics
+(= (transient [1 2]) (transient [1 2])) ; false
+
+; attach metadata to value literal
+(def a^{:created (System/currentTimeMillis)} [1 2 3])
+(meta a) ; {:created 1491849442427}
+
+; keywords can be added as metadata
+(meta ^:private [1 2 3]) ; {:private true}
+(meta ^:private ^:dynamic [1 2 3]) ; {:private true :dynamic true}
+
+; add metadata
+(def b (with-meta a (assoc (meta a) :modified (System/currentTimeMillis))))
+(meta b) ; {:modified 1491873252563 :created 1491873208957}
+
+; update metadata
+(def b (vary-meta a assoc :modified (System/currentTimeMillis)))
+(meta b) ; {:modified 1491873343833 :created 1491873208957}
+
+; metadata does not affect value semantics
+(= a b) ; true
+
+; metadata is copied from persistent modifications
+(meta (conj a 500)) ; {:created 1491873208957}
+
+; implement empty board for conway's game of life
+(defn empty-board
+  "Creates a rectangular empty board of the specified width and height"
+  [w h]
+  (vec (repeat w (vec (repeat h nil)))))
+
+; add living cells to empty board
+(defn populate
+  "Turns :on each of the cells specified as [y x] coordinates"
+  [board living-cells]
+  (reduce (fn [board coordinates]
+            (assoc-in board coordinates :on))
+          board
+          living-cells))
+
+; use empty board and populate
+(def glider (populate (empty-board 6 6) #{[2 0] [2 1] [2 2] [1 2] [0 1]}))
+(print glider)
+
+; create an indexed step function
+(defn neighbours
+  [[x y]]
+  (for [dx [-1 0 1] dy [-1 0 1] :when (not= 0 dx dy)]
+    [(+ dx x) (+ dy y)]))
+(defn count-neighbours
+  [board loc]
+  (count (filter #(get-in board %) (neighbours loc))))
+(defn indexed-step
+  "Yields the next step of the board, using indicies to determine neighbours, liveness, etc."
+  [board]
+  (let [w (count board)
+        h (count (first board))]
+    (loop [new-board board x 0 y 0]
+      (cond
+        (>= x w) new-board
+        (>= y h) (recur new-board (inc x) 0)
+        :else
+        (let [new-liveness
+              (case (count-neighbours board [x y])
+                2 (get-in board [x y])
+                3 :on
+                nil)]
+          (recur (assoc-in new-board [x y] new-liveness) x (inc y)))))))
+(-> (iterate indexed-step glider) (nth 8) print)
+
+; get rid of manual iteration
+(defn indexed-step2
+  "Yields the next step of the board, using indicies to determine neighbours, liveness, etc."
+  [board]
+  (let [w (count board)
+        h (count (first board))]
+    (reduce
+      (fn [new-board x]
+        (reduce
+          (fn [new-board y]
+            (let [new-liveness
+                  (case (count-neighbours board [x y])
+                    2 (get-in board [x y])
+                    3 :on
+                    nil)]
+              (assoc-in new-board [x y] new-liveness)))
+          new-board (range h)))
+      board (range w))))
+(-> (iterate indexed-step2 glider) (nth 8) print)
+
+; get rid of nested reductions
+(defn indexed-step3
+  "Yields the next step of the board, using indicies to determine neighbours, liveness, etc."
+  [board]
+  (let [w (count board)
+        h (count (first board))]
+    (reduce
+      (fn [new-board [x y]]
+        (let [new-liveness
+              (case (count-neighbours board [x y])
+                2 (get-in board [x y])
+                3 :on
+                nil)]
+          (assoc-in new-board [x y] new-liveness)))
+      board (for [x (range  h) y (range w)] [x y]))))
+(-> (iterate indexed-step3x glider) (nth 8) print)
+
+; window function to illustrate one dimensional partition
+(partition 3 1 (concat [nil] (range 5) [nil])) ; ((nil 0 1) (0 1 2) (1 2 3) (2 3 4) (3 4 nil))
+(defn window1D
+  "Returns a lazy sequence of 3-item windows centered around each item of coll"
+  [coll]
+  (partition 3 1 (concat [nil] coll [nil])))
+(window1D (range 5)) ; ((nil 0 1) (0 1 2) (1 2 3) (2 3 4) (3 4 nil))
+
+; create two dimensional partition
+(defn window 
+  "Returns a lazy sequence of 3-item windows centered around each item of coll,
+   padded as necessary with pad or nil."
+  ([coll] (window nil coll))
+  ([pad coll]
+    (partition 3 1 (concat [pad] coll [pad]))))
+(defn cell-block
+  "Creates a sequences of 3x3 windows from a triple of 3 sequences."
+  [[left mid right]]
+  (window (map vector left mid right)))
+(defn liveness
+  "Returns the liveness (nil or :on) of the center cell for the next step"
+  [block]
+  (let [[_ [_ center _] _] block]
+    (case (- (count (filter #{:on} (apply concat block)))
+             (if (= :on center) 1 0))
+      2 center
+      3 :on
+      nil)))
+(defn step-row
+  "Yields the next state of the center row"
+  [rows-triple]
+  (vec (map liveness (cell-block rows-triple))))
+(defn index-free-step
+  "Yields the next state of the board."
+  [board]
+  (vec (map step-row (window (repeat nil) board))))
+(= (nth (iterate indexed-step glider) 8)
+   (nth (iterate index-free-step glider) 8)) ; true
+
+; elegantly implement Conway's game of life
+(defn step
+  "Yields the next state of the world"
+  [cells]
+  (set (for [[loc n] (frequencies (mapcat neighbours cells))
+             :when (or (= n 3) (and (= n 2) (cells loc)))]
+         loc)))
+
+; iterate glider
+(->> (iterate step #{[2 0] [2 1] [2 2] [1 2] [0 1]})
+  (drop 8)
+  first
+  (populate (empty-board 6 6))
+  print)
+
+; define generic step for neighbours, birth, and survive functions
+(defn stepper
+  "Returns a step function for Life-like cell automata.
+   neighbours takes a location and return a sequential collection of locations.
+   survive? and birth? are predicates on the number of living neighbours."
+  [neighbours birth? survive?]
+  (fn [cells]
+    (set (for [[loc n] (frequencies (mapcat neighbours cells))
+               :when (if (cells loc) (survive? n) (birth? n))]
+           loc))))
+
+; equivalent to last iteration on glider but more generic
+(->> (iterate (stepper neighbours #{3} #{2 3}) #{[2 0] [2 1] [2 2] [1 2] [0 1]})
+  (drop 8)
+  first
+  (populate (empty-board 6 6))
+  print)
+
+; create Hex version of Conway's game of life
+(defn hex-neighbours
+  [[x y]]
+  (for [dx [-1 0 1] dy (if (zero? dx) [-2 2] [-1 1])]
+    [(+ dx x) (+ dy y)]))
+(def hex-step (stepper hex-neighbours #{2} #{3 4}))
+
+; oscillator of period 4
+(hex-step #{[0 0] [1 1] [1 3] [0 4]}) ; #{[2 2] [1 5] [1 -1]}
+(hex-step *1) ; #{[1 1] [1 3] [2 4] [2 0]}
+(hex-step *1) ; #{[1 5] [1 -1] [0 2]}
+(hex-step *1) ; #{[0 0] [1 1] [1 3] [0 4]}
+
+; Wilson's algorithm
+(defn maze
+  "Returns a random maze carved out of walls;
+   walls is a set of 2-item sets #{a b} where a and b are locations.
+   The returned maze is a set of the remaining walls."
+  [walls]
+  (let [paths (reduce (fn [index [a b]] ; paths is map of locations to adjancent locations
+                        (merge-with into index {a [b] b [a]}))
+                      {} (map seq walls)) ; map seq walls converts walls into seq
+        start-loc (rand-nth (keys paths))] ; keys paths contains all locations, so rand-th takes any location
+    (loop [walls walls
+           unvisited (disj (set (keys paths)) start-loc)] ; unvisited set is easier to write code with
+      (if-let [loc (when-let [s (seq unvisited)] (rand-nth s))] ; seq makes sure unvisited is not empty and rand-nth can access it
+        (let [walk (iterate (comp rand-nth paths) loc) ; generates infinite random walks of unvisited
+              steps (zipmap (take-while unvisited walk) (next walk))] ; take-while unvisited walk stops random walk at visited location, and next walk is infinite but it is zipped with finite seq
+          (recur (reduce disj walls (map set steps)) ; map set steps converts directions into walls
+                 (reduce disj unvisited (keys steps))))
+        walls))))
+
+; define function to create fully walled maze
+(defn grid
+  [w h]
+  (set (concat
+         (for [i (range (dec w)) j (range h)] #{[i j] [(inc i) j]})
+         (for [i (range w) j (range (dec h))] #{[i j] [i (inc j)]}))))
+
+; define a draw function AND UPDATE
+(defn draw
+  [w h maze path]
+  (doto (javax.swing.JFrame. "Maze")
+    (.setContentPane
+      (doto (proxy [javax.swing.JPanel] []
+              (paintComponent [^java.awt.Graphics g]
+                (let [g (doto ^java.awt.Graphics2D (.create g)
+                          (.scale 10 10)
+                          (.translate 1.5 1.5)
+                          (.setStroke (java.awt.BasicStroke. 0.4)))]
+                  (.drawRect g -1 -1 w h)
+                  (doseq [[[xa ya] [xb yb]] (map sort maze)]
+                    (let [[xc yc] (if (= xa xb)
+                                    [(dec xa) ya]
+                                    [xa (dec ya)])]
+                      (.drawLine g xa ya xc yc)))
+                  (.translate g -0.5 -0.5)
+                  (.setColor g java.awt.Color/RED)
+                  (doseq [[[xa ya] [xb yb]] path] ; path is collection of pairs, so draw it!
+                    (.drawLine g xa ya xb yb)))))
+        (.setPreferredSize (java.awt.Dimension.
+                             (* 10 (inc w)) (* 10 (inc h))))))
+    .pack
+    (.setVisible true)))
+; black magic ^^^
+
+; draw a maze
+(draw 80 80 (maze (grid 80 80)))
+
+; modified maze into wmaze
+(defn wmaze
+  "The original Wilson's algorithm"
+  [walls]
+  (let [paths (reduce (fn [index [a b]] ; paths is map of locations to adjancent locations
+                        (merge-with into index {a [b] b [a]}))
+                      {} (map seq walls)) ; map seq walls converts walls into seq
+        start-loc (rand-nth (keys paths))] ; keys paths contains all locations, so rand-th takes any location
+    (loop [walls walls
+           unvisited (disj (set (keys paths)) start-loc)] ; unvisited set is easier to write code with
+      (if-let [loc (when-let [s (seq unvisited)] (rand-nth s))] ; seq makes sure unvisited is not empty and rand-nth can access it
+        (let [walk (iterate (comp rand-nth paths) loc) ; generates infinite random walks of unvisited
+              steps (zipmap (take-while unvisited walk) (next walk)) ; take-while unvisited walk stops random walk at visited location, and next walk is infinite but it is zipped with finite seq
+              walk (take-while identity (iterate steps loc)) ; retraces only one branch of random walk
+              steps (zipmap walk (next walk))] ; turns path into a map of [from-loc to-loc] entries
+          (recur (reduce disj walls (map set steps)) ; map set steps converts directions into walls
+                 (reduce disj unvisited (keys steps))))
+        walls))))
+
+; draw a wmaze
+(draw 80 80 (wmaze (grid 80 80)))
+
+; define function to create fully inner walled hex maze
+(defn hex-grid
+  [w h]
+  (let [vertices (set (for [y (range h) x (range (if (odd? y) 1 0) (* 2 w) 2)]
+                        [x y]))
+        deltas [[2 0] [1 1] [-1 1]]]
+    (set (for [v vertices d deltas f [+ -]
+               :let [w (vertices (map f v d))]
+               :when w] #{v w}))))
+
+; define function to create fully outer walled hex maze
+(defn- hex-outer-walls
+  [w h]
+  (let [vertices (set (for [y (range h) x (range (if (odd? y) 1 0) (* 2 w) 2)]
+                        [x y]))
+        deltas [[2 0] [1 1] [-1 1]]]
+    (set (for [v vertices d deltas f [+ -]
+               :let [w (map f v d)]
+               :when (not (vertices w))] #{v (vec w)}))))
+
+; define anoter draw function
+(defn hex-draw
+  [w h maze]
+  (doto (javax.swing.JFrame. "Maze")
+    (.setContentPane
+      (doto (proxy [javax.swing.JPanel] []
+              (paintComponent [^java.awt.Graphics g]
+                (let [maze (into maze (hex-outer-walls w h))
+                      g (doto ^java.awt.Graphics2D (.create g)
+                          (.scale 10 10)
+                          (.translate 1.5 1.5)
+                          (.setStroke (java.awt.BasicStroke. 0.4
+                                                             java.awt.BasicStroke/CAP_ROUND
+                                                             java.awt.BasicStroke/JOIN_MITER)))
+                      draw-line (fn [[[xa ya] [xb yb]]]
+                                  (.draw g
+                                    (java.awt.geom.Line2D$Double.
+                                      xa (* 2 ya) xb (* 2 yb))))]
+                  (doseq [[[xa ya] [xb yb]] (map sort maze)]
+                    (draw-line
+                      (cond
+                        (= ya yb) [[(inc xa) (+ ya 0.4)] [(inc xa) (- ya 0.4)]]
+                        (< ya yb) [[(inc xa) (+ ya 0.4)] [xa (+ ya 0.6)]]
+                        :else [[(inc xa) (- ya 0.4)] [xa (- ya 0.6)]])))))) ; it's a rainbow!!
+        (.setPreferredSize (java.awt.Dimension.
+                             (* 20 (inc w)) (* 20 (+ 0.5 h)))))) ; so many colors in my IDE
+    .pack
+    (.setVisible true)))
+; this drains my energy so quickly...
+
+; draw a hex
+(hex-draw 40 40 (maze (hex-grid 40 40)))
+; use zipper api
+(require '[clojure.zip :as z])
+(def v [[1 2 [3 4]] [5 6]])
+(-> v z/vector-zip z/node) ; [[1 2 [3 4]] [5 6]]
+(-> v z/vector-zip z/down z/node) ; [1 2 [3 4]]
+(-> v z/vector-zip z/down z/right z/node) ; [5 6]
+
+; create new zipper nodes
+(-> v z/vector-zip z/down z/right (z/replace 56) z/node) ; 56
+(-> v z/vector-zip z/down z/right (z/replace 56) z/root) ; [[1 2 [3 4]] 56]
+(-> v z/vector-zip z/down z/right z/remove z/node) ; 4
+(-> v z/vector-zip z/down z/right z/remove z/root) ; [[1 2 [3 4]]]
+(-> v z/vector-zip z/down z/down z/right (z/edit * 42) z/root) ; [[1 84 [3 4]] [5 6]]
+
+
+; set up thesus myth
+(def labyrinth
+  (let [g (grid 10 10)] (reduce disj g (maze g))))
+(def thesus (rand-nth (distinct (apply concat labyrinth))))
+(def minotaur (rand-nth (distinct (apply concat labyrinth))))
+
+; create custom zipper
+(defn ariadne-zip
+  [labyrinth loc]
+  (let [paths (reduce (fn [index [a b]]
+                        (merge-with into index {a [b] b [a]}))
+                      {} (map seq labyrinth))
+        children (fn [[from to]]
+                   (seq (for [loc (paths to) ; require children to return a seq
+                              :when (not= loc from)]
+                          [to loc])))]
+    (z/zipper (constantly true) ; all locations might have children
+              children
+              nil ; nil cannot perform updates
+              [nil loc]))) ; nil loc is root
+
+; perform depth-first walk of the maze
+(->> thesus
+  (ariadne-zip labyrinth)
+  (iterate z/next)
+  (filter #(= minotaur (second (z/node %))))
+  first z/path
+  (map second)) ; ([8 5][8 4][8 3][7 3][6 3][6 2][5 2][4 2][3 2][2 2][2 3][1 3][0 3][0 4][0 5][1 5])
+
+; tell a myth with Clojure
+(let [w 80
+      h 80
+      grid (grid w h)
+      walls (maze grid)
+      labyrinth (reduce disj grid walls)
+      places (distinct (apply concat labyrinth))
+      thesus (rand-nth places)
+      minotaur (rand-nth places)
+      path (->> thesus
+             (ariadne-zip labyrinth)
+             (iterate z/next)
+             (filter #(= minotaur (first (z/node %))))
+             first z/path rest)] ; replaces map second because first pair of locations is wierd
+  (draw w h walls path))
